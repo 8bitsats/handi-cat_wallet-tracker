@@ -6,7 +6,7 @@
 <br />
 <div align="center">
   <a href="https://github.com/DracoR22/handi-cat_wallet-tracker">
-    <img src="showcase/handi-cat.jpg" alt="Logo" width="80" height="80">
+    <img src="showcase/logo.jpg" alt="Logo" width="80" height="80">
   </a>
 
   <h3 align="center">🐱 Handi Cat | Wallet Tracker</h3>
@@ -25,18 +25,30 @@
 
 [![Product Name Screen Shot][product-screenshot]](https://t.me/handi_cat_bot)
 
-Handi Cat is a Telegram bot that can track any Solana wallet in real time, providing relevant information
-of each transaction made in Pump.fun, Raydium and Jupiter including transaction hash, tokens and amount swapped, price of the token in SOL, token market cap and much more.
+Handi Cat is a Telegram bot that can track any Solana wallet in real time, it provides relevant information
+of each transaction made in Raydium, Jupiter, Pump.fun and Pump AMM(PumpSwap) including transaction hash, tokens and amount swapped, price of the token in SOL, token market cap and much more.
 
 ## Features
 
-- 📈 Real-time tracking of any transaction
-- 🔍 Detects Pump.fun, Raydium and Jupiter transactions
+- 📈 Tracks in Real-Time any SOL transfer
+- 🔍 Detects Raydium, Jupiter, Pump.fun and PumpSwap transactions
 - 💰 Gets SOL price of the token swapped
-- 📊 Get tokens market cap at the time swapped
+- 📊 Gets token market cap at the time swapped
 - 💰 Gets token amount and supply percentage owned by each tracked wallet
 - 🤖 Each transaction message includes links to popular Solana trading bots to quickly buy the token
 - 🔗 Each transaction provides links to Photon, GMGN and Dex Screener to quickly see the token chart
+
+<p align="right">(<a href="#readme-top">back to top</a>)</p>
+
+## Bot Commands
+
+- `/start` – Opens the bot's main menu
+- `/add` – Add a new wallet address
+- `/delete` – Delete a wallet addresss
+- `/upgrade` – Access the subscription menu
+- `/ban_wallet` – Flag a wallet as BANNED and remove it from the wallet pool **(admin only)**
+- `/help_notify` – Learn how bot notifications work
+- `/help_group` – Instructions for adding the bot to group chats
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
@@ -44,7 +56,7 @@ of each transaction made in Pump.fun, Raydium and Jupiter including transaction 
 
 - 🌐 Node.JS
 - 📘 TypeScript
-- 📊 Prisma and Prisma Pulse
+- 📊 Prisma ORM
 - 🪙 Solana Web3.js
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
@@ -75,33 +87,27 @@ Follow these simple steps to setup Handi Cat locally on your machine
 
 3. Rename `.env.example` file to `.env`
 
-4. Go to `supabase.com` and create a free database
+4. Create a Postgres database and paste the connection string into `DATABASE_URL`
 
-5. In your `Supabase` dashboard go to `Project Settings` -> `Database` paste the connection string into `SUPABASE_DATABASE_URL` environment variable. Make sure you activate the `pooler connection` and set the
-   port to `5432` your connection string should look like this: `postgresql://postgres.[PROJECT_URL]:[YOUR-PASSWORD]@aws-0-[YOUR-DB-REGION].pooler.supabase.com:5432/postgres?pgbouncer=true
-`
+5. Create a new `Telegram Bot` using `Bot Father` and get your `BOT_TOKEN`, then paste it in the environment variable
 
-6. Now you need to [Setup Prisma Pulse with a Supabase database](https://medium.com/@dilsharahasanka/prisma-pulse-hands-on-guide-b220954b3245) for real time database logs
-
-7. After you get your `Prisma Pulse` API key, paste it in the `PULSE_API_KEY` environment variable
-
-8. Create a new `Telegram Bot` using `Bot Father` and get your `BOT_TOKEN`, then paste it in the environment variable
-
-9. Run migrate command to push the database schemas and generate all types
+6. Run migrate command to push the database schemas and generate all types
 
 ```sh
   pnpm db:migrate
 ```
 
-10. Now you have to setup an rpc provider in `src/providers/solana.ts`, you can change all NETWORKS to `SOLANA_NETWORK` if you dont have one
+7. Go to `src/providers/telegram.ts` and uncomment line 13, you will also need to comment everything after this line. We use this polling connection for local environments, if you decide to deploy the bot, then change it back to webhook connection
 
-11. Start the bot
+8. (Optional) setup a custom RPC provider inside of `RPC_ENDPOINTS` environment variable, you can place as many endpoints as you want if you folow them up with a comma. `e.g: https://rpc1.com,https://rpc2.com`
+
+9. Start the bot
 
 ```sh
   pnpm start
 ```
 
-11. That's it! now your local version of Handi Cat is ready, you can also fill the other environment variables to setup an RPC of your choice
+10. That's it! now your local version of Handi Cat is ready to use.
 
 <p align="center"><img src="./showcase/cli-pic.png" width="95%" alt="Screenshot of bot succesfully running"/></>
 

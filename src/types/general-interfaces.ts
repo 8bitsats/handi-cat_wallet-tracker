@@ -1,5 +1,6 @@
 import TelegramBot from 'node-telegram-bot-api'
 import { SwapType, WalletWithUsers } from './swap-types'
+import { Collection, Data, TokenStandard, Uses } from '@metaplex-foundation/mpl-token-metadata'
 
 export interface NativeParserInterface {
   platform: SwapType
@@ -22,6 +23,30 @@ export interface NativeParserInterface {
     tokenAmountIn: string
     tokenAmountOut: string
   }
+}
+
+export interface TransferParserInterface {
+  owner: string
+  description: string
+  fromAddress: string
+  toAddress: string
+  solAmount: number
+  lamportsAmount: number
+  solPrice: string
+  signature: string
+}
+
+export interface ParsedTokenInfo {
+  key: string
+  updateAuthority: string
+  mint: string
+  data: Data
+  primarySaleHappened: boolean
+  isMutable: boolean
+  editionNonce: number
+  tokenStandard: TokenStandard
+  collection: Collection
+  uses: Uses
 }
 
 export interface CreateUserInterface {

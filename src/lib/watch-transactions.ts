@@ -6,26 +6,16 @@ import { SendTransactionMsgHandler } from '../bot/handlers/send-tx-msg-handler'
 import { bot } from '../providers/telegram'
 import { SwapType, WalletWithUsers } from '../types/swap-types'
 import { RateLimit } from './rate-limit'
-import {
-  JUPITER_PROGRAM_ID,
-  PUMP_FUN_PROGRAM_ID,
-  PUMP_FUN_TOKEN_MINT_AUTH,
-  RAYDIUM_PROGRAM_ID,
-} from '../config/program-ids'
 import chalk from 'chalk'
 import { RpcConnectionManager } from '../providers/solana'
-import { NativeParserInterface } from '../types/general-interfaces'
 import pLimit from 'p-limit'
 import { CronJobs } from './cron-jobs'
 import { PrismaUserRepository } from '../repositories/prisma/user'
-
-export const trackedWallets: Set<string> = new Set()
+import { WalletPool } from '../config/wallet-pool'
+import TelegramBot from 'node-telegram-bot-api'
 
 export class WatchTransaction extends EventEmitter {
-  public subscriptions: Map<string, number>
-
   private walletTransactions: Map<string, { count: number; startTime: number }>
-  public excludedWallets: Map<string, boolean>
 
   private rateLimit: RateLimit
 
@@ -33,13 +23,11 @@ export class WatchTransaction extends EventEmitter {
   constructor() {
     super()
 
-    this.subscriptions = new Map()
     this.walletTransactions = new Map()
-    this.excludedWallets = new Map()
 
     // this.trackedWallets = new Set()
 
-    this.rateLimit = new RateLimit(this.subscriptions)
+    this.rateLimit = new RateLimit(WalletPool.subscriptions)
 
     this.prismaUserRepository = new PrismaUserRepository()
   }
@@ -51,7 +39,7 @@ export class WatchTransaction extends EventEmitter {
         const walletAddress = publicKey.toBase58()
 
         // Check if a subscription already exists for this wallet address
-        if (this.subscriptions.has(walletAddress)) {
+        if (WalletPool.subscriptions.has(walletAddress)) {
           // console.log(`Already watching for: ${walletAddress}`)
           continue // Skip re-subscribing
         }
@@ -66,7 +54,7 @@ export class WatchTransaction extends EventEmitter {
           publicKey,
           async (logs, ctx) => {
             // Exclude wallets that have reached the limit
-            if (this.excludedWallets.has(walletAddress)) {
+            if (WalletPool.bannedWallets.has(walletAddress)) {
               console.log(`Wallet ${walletAddress} is excluded from logging.`)
 
               return
@@ -77,7 +65,7 @@ export class WatchTransaction extends EventEmitter {
             //   return
             // }
 
-            const { isRelevant, swap } = this.isRelevantTransaction(logs)
+            const { isRelevant, swap } = ValidTransactions.isRelevantTransaction(logs)
 
             if (!isRelevant) {
               // console.log('TRANSACTION IS NOT DEFI', logs.signature)
@@ -93,7 +81,7 @@ export class WatchTransaction extends EventEmitter {
             const isWalletRateLimited = await this.rateLimit.txPerSecondCap({
               wallet,
               bot,
-              excludedWallets: this.excludedWallets,
+              excludedWallets: WalletPool.bannedWallets,
               walletData,
             })
 
@@ -112,23 +100,47 @@ export class WatchTransaction extends EventEmitter {
             // Parse transaction
             const solPriceUsd = CronJobs.getSolPrice()
             const transactionParser = new TransactionParser(transactionSignature)
-            const parsed = await transactionParser.parseRpc(transactionDetails, swap, solPriceUsd)
 
-            if (!parsed) {
-              // console.log('NO PARSED')
-              return
+            if (
+              swap === 'raydium' ||
+              swap === 'jupiter' ||
+              swap === 'pumpfun' ||
+              swap === 'mint_pumpfun' ||
+              swap === 'pumpfun_amm'
+            ) {
+              const parsed = await transactionParser.parseDefiTransaction(
+                transactionDetails,
+                swap,
+                solPriceUsd,
+                walletAddress,
+              )
+              if (!parsed) {
+                return
+              }
+              console.log(parsed.description)
+
+              // await this.sendTransactionMessageToUsers(wallet, parsed)S
+              await this.sendMessageToUsers(wallet, parsed, (handler, parsedData, userId) =>
+                handler.sendTransactionMessage(parsedData, userId),
+              )
+            } else if (swap === 'sol_transfer') {
+              const parsed = await transactionParser.parseSolTransfer(transactionDetails, solPriceUsd, walletAddress)
+              if (!parsed) {
+                return
+              }
+              console.log(parsed.description)
+
+              // await this.sendTransferMessageToUsers(wallet, parsed)
+              await this.sendMessageToUsers(wallet, parsed, (handler, parsedData, userId) =>
+                handler.sendTransferMessage(parsedData, userId),
+              )
             }
-
-            console.log(parsed.description)
-
-            // Use bot to send message of transaction
-            await this.sendMessagesToUsers(wallet, parsed)
           },
           'processed',
         )
 
         // Store subscription ID
-        this.subscriptions.set(wallet.address, subscriptionId)
+        WalletPool.subscriptions.set(wallet.address, subscriptionId)
         console.log(
           chalk.greenBright(`Subscribed to logs with subscription ID: `) + chalk.yellowBright.bold(subscriptionId),
         )
@@ -141,7 +153,7 @@ export class WatchTransaction extends EventEmitter {
   public async getParsedTransaction(transactionSignature: string, retries = 4) {
     for (let attempt = 1; attempt <= retries; attempt++) {
       try {
-        const transactionDetails = await RpcConnectionManager.connections[1].getParsedTransactions(
+        const transactionDetails = await RpcConnectionManager.connections[0].getParsedTransactions(
           [transactionSignature],
           {
             maxSupportedTransactionVersion: 0,
@@ -165,16 +177,22 @@ export class WatchTransaction extends EventEmitter {
     return null
   }
 
-  private async sendMessagesToUsers(wallet: WalletWithUsers, parsed: NativeParserInterface) {
+  private async sendMessageToUsers<T>(
+    wallet: WalletWithUsers,
+    parsed: T,
+    sendMessageFn: (
+      handler: SendTransactionMsgHandler,
+      parsed: T,
+      userId: string,
+    ) => Promise<TelegramBot.Message | undefined>,
+  ) {
     const sendMessageHandler = new SendTransactionMsgHandler(bot)
 
     const pausedUsers = (await this.prismaUserRepository.getPausedUsers(wallet.userWallets.map((w) => w.userId))) || []
 
-    const activeUsers = wallet.userWallets.filter(
-      (w) => !pausedUsers || !pausedUsers.includes(w.userId), // Include only non-paused users
-    )
+    const activeUsers = wallet.userWallets.filter((w) => !pausedUsers || !pausedUsers.includes(w.userId))
 
-    // just in case, somehow sometimes I get duplicated users here, I should probably address this in the track wallets function instead
+    // Remove duplicate users
     const uniqueActiveUsers = Array.from(new Set(activeUsers.map((user) => user.userId))).map((userId) =>
       activeUsers.find((user) => user.userId === userId),
     )
@@ -184,9 +202,8 @@ export class WatchTransaction extends EventEmitter {
     const tasks = uniqueActiveUsers.map((user) =>
       limit(async () => {
         if (user) {
-          // console.log('Users:', user)
           try {
-            await sendMessageHandler.send(parsed, user.userId)
+            await sendMessageFn(sendMessageHandler, parsed, user.userId)
           } catch (error) {
             console.log(`Error sending message to user ${user.userId}`)
           }
@@ -195,28 +212,5 @@ export class WatchTransaction extends EventEmitter {
     )
 
     await Promise.all(tasks)
-  }
-
-  private isRelevantTransaction(logs: Logs): { isRelevant: boolean; swap: SwapType } {
-    if (!logs.logs || logs.logs.length === 0) {
-      return { isRelevant: false, swap: null }
-    }
-
-    const logString = logs.logs.join(' ')
-
-    if (logString.includes(PUMP_FUN_TOKEN_MINT_AUTH)) {
-      return { isRelevant: true, swap: 'mint_pumpfun' }
-    }
-    if (logString.includes(PUMP_FUN_PROGRAM_ID)) {
-      return { isRelevant: true, swap: 'pumpfun' }
-    }
-    if (logString.includes(JUPITER_PROGRAM_ID)) {
-      return { isRelevant: true, swap: 'jupiter' }
-    }
-    if (logString.includes(RAYDIUM_PROGRAM_ID)) {
-      return { isRelevant: true, swap: 'raydium' }
-    }
-
-    return { isRelevant: false, swap: null }
   }
 }
